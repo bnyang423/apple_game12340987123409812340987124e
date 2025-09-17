@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Fruit Box (18x9)</title>
+  <style>
+    body { background: #fafafa; font-family: sans-serif; }
+    #game { margin: 20px auto; display: block; }
+    #scoreboard { font-size: 20px; margin: 10px 0; }
+    #btns { margin-bottom: 10px; }
+    .btn { padding: 5px 14px; font-size: 15px; margin-right: 8px; border-radius: 5px; border: 1px solid #888; background: #fff; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div id="scoreboard">점수: <span id="score">0</span></div>
+  <div id="btns">
+    <button class="btn" onclick="initGame()">다시 시작</button>
+  </div>
+  <canvas id="game" width="900" height="450"></canvas>
+  <script>
+    // 게임 설정
+    const COLS = 18;
+    const ROWS = 9;
+    const CELL_SIZE = 50;
+    const CANVAS_W = COLS * CELL_SIZE;
+    const CANVAS_H = ROWS * CELL_SIZE;
+
+    // 사과 그리기용 색상
+    const APPLE_COLORS = ["#f00","#fa0","#fd5","#cf0","#0c8","#0ac","#09c","#70f","#c0c"];
+
+    let apples = [];
+    let selected = null;  // {x1, y1, x2, y2}
+    let score = 0;
+
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    canvas.width = CANVAS_W;
+    canvas.height = CANVAS_H;
+
+    function randAppleNum() {
+      // 1~9 중 랜덤
+      return Math.floor(Math.random() * 9) + 1;
+    }
+
+    function initGame() {
+      apples = [];
+      for(let y=0; y<ROWS; y++) {
+        let row = [];
+        for(let x=0; x<COLS; x++) {
+          row.push({num: randAppleNum(), gone: false});
+        }
+        apples.push(row);
+      }
+      score = 0;
+      document.getElementById('score').textContent = score;
+      selected = null;
+      draw();
+    }
+
+    function draw() {
+      ctx.clearRect(0,0,CANVAS_W,CANVAS_H);
+
+      // grid
+      ctx.strokeStyle = "#bbb";
+      for(let x=0;x<=COLS;x++) {
+        ctx.beginPath();
+        ctx.moveTo(x*CELL_SIZE,0);
+        ctx.lineTo(x*CELL_SIZE,CANVAS_H);
+        ctx.stroke();
+      }
+      for(let y=0;y<=ROWS;y++) {
+        ctx.beginPath();
+        ctx.moveTo(0,y*CELL_SIZE);
+        ctx.lineTo(CANVAS_W,y*CELL_SIZE);
+        ctx.stroke();
+      }
+
+      // apples
+      for(let y=0;y<ROWS;y++) {
+        for(let x=0;x<COLS;x++) {
+          let a = apples[y][x];
+          if(a.gone) continue;
+          let cx = x*CELL_SIZE + CELL_SIZE/2;
+          let cy = y*CELL_SIZE + CELL_SIZE/2;
+          ctx.beginPath();
+          ctx.arc(cx,cy,CELL_SIZE/2-8,0,2*Math.PI);
+          ctx.fillStyle = APPLE_COLORS[a.num-1];
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = "#7b3e00";
+          ctx.stroke();
+          ctx.lineWidth = 1;
+          ctx.fillStyle = "#fff";
+          ctx.font = "bold 20px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(a.num,cx,cy);
+        }
+      }
+      // 선택 영역 드래그 표시
+      if(selected) {
+        let {x1,y1,x2,y2,valid} = selected;
+        let sx = Math.min(x1,x2)*CELL_SIZE;
+        let sy = Math.min(y1,y2)*CELL_SIZE;
+        let ex = (Math.max(x1,x2)+1)*CELL_SIZE;
+        let ey = (Math.max(y1,y2)+1)*CELL_SIZE;
+        ctx.save();
+        ctx.globalAlpha = 0.2;
+        ctx.fillStyle = valid ? "#f00" : "#06f";
+        ctx.fillRect(sx,sy,ex-sx,ey-sy);
+        ctx.restore();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = valid ? "#f00" : "#06f";
+        ctx.strokeRect(sx,sy,ex-sx,ey-sy);
+      }
+    }
+
+    function getApplesInRect(x1,y1,x2,y2) {
+      let minX = Math.min(x1,x2);
+      let maxX = Math.max(x1,x2);
+      let minY = Math.min(y1,y2);
+      let maxY = Math.max(y1,y2);
+      let arr = [];
+      for(let y=minY;y<=maxY;y++) {
+        for(let x=minX;x<=maxX;x++) {
+          if(apples[y][x] && !apples[y][x].gone) arr.push({x,y,num: apples[y][x].num});
+        }
+      }
+      return arr;
+    }
+
+    function checkSum10(applesArr) {
+      let sum = applesArr.reduce((acc,a)=>acc+a.num,0);
+      return sum===10;
+    }
+
+    // 마우스/터치 이벤트
+    let dragging = false;
+    let startCell = null;
+
+    function eventToCell(e) {
+      let rect = canvas.getBoundingClientRect();
+      let x = ((e.touches ? e.touches[0].clientX : e.clientX) - rect.left);
+      let y = ((e.touches ? e.touches[0].clientY : e.clientY) - rect.top);
+      let cx = Math.floor(x/CELL_SIZE);
+      let cy = Math.floor(y/CELL_SIZE);
+      return {x: Math.max(0,Math.min(COLS-1,cx)), y: Math.max(0,Math.min(ROWS-1,cy))};
+    }
+
+    canvas.addEventListener('mousedown', e => {
+      dragging = true;
+      startCell = eventToCell(e);
+      selected = {...startCell, x2: startCell.x, y2: startCell.y, valid:false};
+      draw();
+    });
+    canvas.addEventListener('mousemove', e => {
+      if(!dragging) return;
+      let curr = eventToCell(e);
+      let applesArr = getApplesInRect(startCell.x, startCell.y, curr.x, curr.y);
+      let valid = applesArr.length>0 && checkSum10(applesArr);
+      selected = {x1: startCell.x, y1: startCell.y, x2: curr.x, y2: curr.y, valid};
+      draw();
+    });
+    canvas.addEventListener('mouseup', e => {
+      if(!dragging) return;
+      let curr = eventToCell(e);
+      let applesArr = getApplesInRect(startCell.x, startCell.y, curr.x, curr.y);
+      let valid = applesArr.length>0 && checkSum10(applesArr);
+      if(valid) {
+        // 사과 없애고 점수
+        applesArr.forEach(a=>{apples[a.y][a.x].gone=true;});
+        score += applesArr.length;
+        document.getElementById('score').textContent = score;
+      }
+      selected = null;
+      dragging = false;
+      draw();
+    });
+
+    // 모바일 터치 대응
+    canvas.addEventListener('touchstart', e => {
+      e.preventDefault();
+      dragging = true;
+      startCell = eventToCell(e);
+      selected = {...startCell, x2: startCell.x, y2: startCell.y, valid:false};
+      draw();
+    },{passive:false});
+    canvas.addEventListener('touchmove', e => {
+      if(!dragging) return;
+      let curr = eventToCell(e);
+      let applesArr = getApplesInRect(startCell.x, startCell.y, curr.x, curr.y);
+      let valid = applesArr.length>0 && checkSum10(applesArr);
+      selected = {x1: startCell.x, y1: startCell.y, x2: curr.x, y2: curr.y, valid};
+      draw();
+    },{passive:false});
+    canvas.addEventListener('touchend', e => {
+      if(!dragging) return;
+      let curr = selected ? {x:selected.x2, y:selected.y2} : startCell;
+      let applesArr = getApplesInRect(startCell.x, startCell.y, curr.x, curr.y);
+      let valid = applesArr.length>0 && checkSum10(applesArr);
+      if(valid) {
+        applesArr.forEach(a=>{apples[a.y][a.x].gone=true;});
+        score += applesArr.length;
+        document.getElementById('score').textContent = score;
+      }
+      selected = null;
+      dragging = false;
+      draw();
+    },{passive:false});
+
+    // 첫 시작
+    initGame();
+  </script>
+</body>
+</html>
