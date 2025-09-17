@@ -7,6 +7,7 @@
     body { background: #fafafa; font-family: sans-serif; }
     #game { margin: 20px auto; display: block; }
     #scoreboard { font-size: 20px; margin: 10px 0; }
+    #timer { font-size: 20px; margin: 10px 0; color: #d32f2f; }
     #btns { margin-bottom: 10px; }
     .btn { padding: 5px 14px; font-size: 15px; margin-right: 8px; border-radius: 5px; border: 1px solid #888; background: #fff; cursor: pointer; }
     #gameover-overlay {
@@ -26,10 +27,12 @@
     #game-container { position: relative; width: 900px; margin: 0 auto; }
     .score-label { font-size: 28px; font-weight: bold; margin-bottom: 10px; }
     .highscore-label { font-size: 20px; color: #666; }
+    .reason-label { font-size: 22px; margin-bottom: 8px; color: #1976d2; }
     #restart-btn-center { margin-top: 22px; font-size: 18px; padding: 8px 34px; border-radius: 8px; }
   </style>
 </head>
 <body>
+  <div id="timer">남은 시간: <span id="time">200</span>초</div>
   <div id="scoreboard">점수: <span id="score">0</span> / 최고점수: <span id="highscore">0</span></div>
   <div id="btns">
     <button class="btn" onclick="initGame()">다시 시작</button>
@@ -38,6 +41,7 @@
     <canvas id="game" width="900" height="450"></canvas>
     <div id="gameover-overlay" style="display:none;">
       <div id="gameover-content">
+        <div class="reason-label" id="end-reason"></div>
         <div class="score-label" id="final-score"></div>
         <div class="highscore-label" id="final-highscore"></div>
         <button class="btn" id="restart-btn-center" onclick="initGame()">다시 시작</button>
@@ -55,11 +59,16 @@
     // 사과 색상 (통일)
     const APPLE_COLOR = "#f44336"; // 빨간색
 
+    // 제한시간(초)
+    const TIME_LIMIT = 200;
+
     let apples = [];
     let selected = null;
     let score = 0;
     let highscore = 0;
     let gameover = false;
+    let timer = TIME_LIMIT;
+    let intervalId = null;
 
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
@@ -70,6 +79,8 @@
     const finalScoreEl = document.getElementById('final-score');
     const finalHighscoreEl = document.getElementById('final-highscore');
     const highscoreSpan = document.getElementById('highscore');
+    const timerSpan = document.getElementById('time');
+    const endReasonEl = document.getElementById('end-reason');
 
     function randAppleNum() {
       return Math.floor(Math.random() * 9) + 1;
@@ -93,14 +104,41 @@
       highscoreSpan.textContent = highscore;
     }
 
-    function showGameOver() {
+    function updateTimerDisplay() {
+      timerSpan.textContent = timer;
+    }
+
+    function showGameOver(reason) {
       overlay.style.display = "flex";
+      endReasonEl.textContent = reason;
       finalScoreEl.textContent = `최종 점수: ${score}`;
       finalHighscoreEl.textContent = `최고 점수: ${highscore}`;
     }
 
     function hideGameOver() {
       overlay.style.display = "none";
+      endReasonEl.textContent = "";
+    }
+
+    function stopTimer() {
+      if(intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    }
+
+    function startTimer() {
+      stopTimer();
+      intervalId = setInterval(() => {
+        if(gameover) return;
+        timer--;
+        updateTimerDisplay();
+        if(timer <= 0) {
+          timer = 0;
+          updateTimerDisplay();
+          endGame("제한시간 종료!");
+        }
+      }, 1000);
     }
 
     function initGame() {
@@ -115,10 +153,13 @@
       score = 0;
       gameover = false;
       selected = null;
+      timer = TIME_LIMIT;
       highscore = loadHighscore();
       updateScoreDisplay();
+      updateTimerDisplay();
       hideGameOver();
       draw();
+      startTimer();
     }
 
     function draw() {
@@ -198,9 +239,18 @@
       return sum===10;
     }
 
+    // 모든 사과가 지워졌는지 확인
+    function allApplesGone() {
+      for(let y=0;y<ROWS;y++) {
+        for(let x=0;x<COLS;x++) {
+          if(apples[y][x] && !apples[y][x].gone) return false;
+        }
+      }
+      return true;
+    }
+
     // 더 이상 조합이 가능한지 체크 (합이 10이 되는 직사각형이 있는지)
     function hasAvailableMove() {
-      // 최소 1x1 ~ 최대 전체 영역까지 모두 확인 (속도는 충분히 빠름)
       for(let y1=0; y1<ROWS; y1++) {
         for(let x1=0; x1<COLS; x1++) {
           for(let y2=y1; y2<ROWS; y2++) {
@@ -212,6 +262,18 @@
         }
       }
       return false;
+    }
+
+    // 게임 종료 처리
+    function endGame(reason) {
+      gameover = true;
+      stopTimer();
+      if(score > highscore) {
+        highscore = score;
+        saveHighscore(highscore);
+      }
+      updateScoreDisplay();
+      showGameOver(reason);
     }
 
     // 마우스/터치 이벤트
@@ -227,15 +289,11 @@
       return {x: Math.max(0,Math.min(COLS-1,cx)), y: Math.max(0,Math.min(ROWS-1,cy))};
     }
 
-    function endGameIfNoMove() {
-      if(!hasAvailableMove()) {
-        gameover = true;
-        if(score > highscore) {
-          highscore = score;
-          saveHighscore(highscore);
-        }
-        updateScoreDisplay();
-        showGameOver();
+    function checkGameEnd() {
+      if(allApplesGone()) {
+        endGame("모든 사과를 지웠습니다!");
+      } else if(!hasAvailableMove()) {
+        endGame("더 이상 지울 수 있는 사과가 없습니다!");
       }
     }
 
@@ -264,7 +322,7 @@
         score += applesArr.length;
         updateScoreDisplay();
         draw();
-        setTimeout(()=>{ endGameIfNoMove(); }, 100); // 애니메이션 효과용 딜레이
+        setTimeout(checkGameEnd, 100);
       }
       selected = null;
       dragging = false;
@@ -298,7 +356,7 @@
         score += applesArr.length;
         updateScoreDisplay();
         draw();
-        setTimeout(()=>{ endGameIfNoMove(); }, 100);
+        setTimeout(checkGameEnd, 100);
       }
       selected = null;
       dragging = false;
