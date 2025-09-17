@@ -9,14 +9,41 @@
     #scoreboard { font-size: 20px; margin: 10px 0; }
     #btns { margin-bottom: 10px; }
     .btn { padding: 5px 14px; font-size: 15px; margin-right: 8px; border-radius: 5px; border: 1px solid #888; background: #fff; cursor: pointer; }
+    #gameover-overlay {
+      position: absolute;
+      left: 0; top: 0; width: 100%; height: 100%;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.5);
+      z-index: 10;
+    }
+    #gameover-content {
+      background: #fff;
+      padding: 40px 30px 30px 30px;
+      border-radius: 16px;
+      text-align: center;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.2);
+    }
+    #game-container { position: relative; width: 900px; margin: 0 auto; }
+    .score-label { font-size: 28px; font-weight: bold; margin-bottom: 10px; }
+    .highscore-label { font-size: 20px; color: #666; }
+    #restart-btn-center { margin-top: 22px; font-size: 18px; padding: 8px 34px; border-radius: 8px; }
   </style>
 </head>
 <body>
-  <div id="scoreboard">점수: <span id="score">0</span></div>
+  <div id="scoreboard">점수: <span id="score">0</span> / 최고점수: <span id="highscore">0</span></div>
   <div id="btns">
     <button class="btn" onclick="initGame()">다시 시작</button>
   </div>
-  <canvas id="game" width="900" height="450"></canvas>
+  <div id="game-container">
+    <canvas id="game" width="900" height="450"></canvas>
+    <div id="gameover-overlay" style="display:none;">
+      <div id="gameover-content">
+        <div class="score-label" id="final-score"></div>
+        <div class="highscore-label" id="final-highscore"></div>
+        <button class="btn" id="restart-btn-center" onclick="initGame()">다시 시작</button>
+      </div>
+    </div>
+  </div>
   <script>
     // 게임 설정
     const COLS = 18;
@@ -25,21 +52,55 @@
     const CANVAS_W = COLS * CELL_SIZE;
     const CANVAS_H = ROWS * CELL_SIZE;
 
-    // 사과 그리기용 색상
-    const APPLE_COLORS = ["#f00","#fa0","#fd5","#cf0","#0c8","#0ac","#09c","#70f","#c0c"];
+    // 사과 색상 (통일)
+    const APPLE_COLOR = "#f44336"; // 빨간색
 
     let apples = [];
-    let selected = null;  // {x1, y1, x2, y2}
+    let selected = null;
     let score = 0;
+    let highscore = 0;
+    let gameover = false;
 
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
     canvas.width = CANVAS_W;
     canvas.height = CANVAS_H;
 
+    const overlay = document.getElementById('gameover-overlay');
+    const finalScoreEl = document.getElementById('final-score');
+    const finalHighscoreEl = document.getElementById('final-highscore');
+    const highscoreSpan = document.getElementById('highscore');
+
     function randAppleNum() {
-      // 1~9 중 랜덤
       return Math.floor(Math.random() * 9) + 1;
+    }
+
+    function saveHighscore(val) {
+      try {
+        localStorage.setItem('fruitbox_highscore', String(val));
+      } catch(e) {}
+    }
+
+    function loadHighscore() {
+      try {
+        const v = localStorage.getItem('fruitbox_highscore');
+        return v ? parseInt(v) : 0;
+      } catch(e) { return 0; }
+    }
+
+    function updateScoreDisplay() {
+      document.getElementById('score').textContent = score;
+      highscoreSpan.textContent = highscore;
+    }
+
+    function showGameOver() {
+      overlay.style.display = "flex";
+      finalScoreEl.textContent = `최종 점수: ${score}`;
+      finalHighscoreEl.textContent = `최고 점수: ${highscore}`;
+    }
+
+    function hideGameOver() {
+      overlay.style.display = "none";
     }
 
     function initGame() {
@@ -52,8 +113,11 @@
         apples.push(row);
       }
       score = 0;
-      document.getElementById('score').textContent = score;
+      gameover = false;
       selected = null;
+      highscore = loadHighscore();
+      updateScoreDisplay();
+      hideGameOver();
       draw();
     }
 
@@ -84,7 +148,7 @@
           let cy = y*CELL_SIZE + CELL_SIZE/2;
           ctx.beginPath();
           ctx.arc(cx,cy,CELL_SIZE/2-8,0,2*Math.PI);
-          ctx.fillStyle = APPLE_COLORS[a.num-1];
+          ctx.fillStyle = APPLE_COLOR;
           ctx.fill();
           ctx.lineWidth = 2;
           ctx.strokeStyle = "#7b3e00";
@@ -106,11 +170,11 @@
         let ey = (Math.max(y1,y2)+1)*CELL_SIZE;
         ctx.save();
         ctx.globalAlpha = 0.2;
-        ctx.fillStyle = valid ? "#f00" : "#06f";
+        ctx.fillStyle = valid ? "#f44336" : "#06f";
         ctx.fillRect(sx,sy,ex-sx,ey-sy);
         ctx.restore();
         ctx.lineWidth = 3;
-        ctx.strokeStyle = valid ? "#f00" : "#06f";
+        ctx.strokeStyle = valid ? "#f44336" : "#06f";
         ctx.strokeRect(sx,sy,ex-sx,ey-sy);
       }
     }
@@ -134,6 +198,22 @@
       return sum===10;
     }
 
+    // 더 이상 조합이 가능한지 체크 (합이 10이 되는 직사각형이 있는지)
+    function hasAvailableMove() {
+      // 최소 1x1 ~ 최대 전체 영역까지 모두 확인 (속도는 충분히 빠름)
+      for(let y1=0; y1<ROWS; y1++) {
+        for(let x1=0; x1<COLS; x1++) {
+          for(let y2=y1; y2<ROWS; y2++) {
+            for(let x2=x1; x2<COLS; x2++) {
+              let applesArr = getApplesInRect(x1, y1, x2, y2);
+              if(applesArr.length>0 && checkSum10(applesArr)) return true;
+            }
+          }
+        }
+      }
+      return false;
+    }
+
     // 마우스/터치 이벤트
     let dragging = false;
     let startCell = null;
@@ -147,14 +227,27 @@
       return {x: Math.max(0,Math.min(COLS-1,cx)), y: Math.max(0,Math.min(ROWS-1,cy))};
     }
 
+    function endGameIfNoMove() {
+      if(!hasAvailableMove()) {
+        gameover = true;
+        if(score > highscore) {
+          highscore = score;
+          saveHighscore(highscore);
+        }
+        updateScoreDisplay();
+        showGameOver();
+      }
+    }
+
     canvas.addEventListener('mousedown', e => {
+      if(gameover) return;
       dragging = true;
       startCell = eventToCell(e);
       selected = {...startCell, x2: startCell.x, y2: startCell.y, valid:false};
       draw();
     });
     canvas.addEventListener('mousemove', e => {
-      if(!dragging) return;
+      if(!dragging || gameover) return;
       let curr = eventToCell(e);
       let applesArr = getApplesInRect(startCell.x, startCell.y, curr.x, curr.y);
       let valid = applesArr.length>0 && checkSum10(applesArr);
@@ -162,15 +255,16 @@
       draw();
     });
     canvas.addEventListener('mouseup', e => {
-      if(!dragging) return;
+      if(!dragging || gameover) return;
       let curr = eventToCell(e);
       let applesArr = getApplesInRect(startCell.x, startCell.y, curr.x, curr.y);
       let valid = applesArr.length>0 && checkSum10(applesArr);
       if(valid) {
-        // 사과 없애고 점수
         applesArr.forEach(a=>{apples[a.y][a.x].gone=true;});
         score += applesArr.length;
-        document.getElementById('score').textContent = score;
+        updateScoreDisplay();
+        draw();
+        setTimeout(()=>{ endGameIfNoMove(); }, 100); // 애니메이션 효과용 딜레이
       }
       selected = null;
       dragging = false;
@@ -179,6 +273,7 @@
 
     // 모바일 터치 대응
     canvas.addEventListener('touchstart', e => {
+      if(gameover) return;
       e.preventDefault();
       dragging = true;
       startCell = eventToCell(e);
@@ -186,7 +281,7 @@
       draw();
     },{passive:false});
     canvas.addEventListener('touchmove', e => {
-      if(!dragging) return;
+      if(!dragging || gameover) return;
       let curr = eventToCell(e);
       let applesArr = getApplesInRect(startCell.x, startCell.y, curr.x, curr.y);
       let valid = applesArr.length>0 && checkSum10(applesArr);
@@ -194,14 +289,16 @@
       draw();
     },{passive:false});
     canvas.addEventListener('touchend', e => {
-      if(!dragging) return;
+      if(!dragging || gameover) return;
       let curr = selected ? {x:selected.x2, y:selected.y2} : startCell;
       let applesArr = getApplesInRect(startCell.x, startCell.y, curr.x, curr.y);
       let valid = applesArr.length>0 && checkSum10(applesArr);
       if(valid) {
         applesArr.forEach(a=>{apples[a.y][a.x].gone=true;});
         score += applesArr.length;
-        document.getElementById('score').textContent = score;
+        updateScoreDisplay();
+        draw();
+        setTimeout(()=>{ endGameIfNoMove(); }, 100);
       }
       selected = null;
       dragging = false;
@@ -209,7 +306,10 @@
     },{passive:false});
 
     // 첫 시작
-    initGame();
+    window.onload = () => {
+      highscore = loadHighscore();
+      initGame();
+    };
   </script>
 </body>
 </html>
